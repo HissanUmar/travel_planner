@@ -1,11 +1,7 @@
-import sqlite3
-import os
-
-DB_PATH = os.path.join("db", "chat.db")
+from .connection import get_conn
 
 def init_db():
-    os.makedirs("db", exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -18,7 +14,7 @@ def init_db():
     conn.close()
 
 def save_message(user_message: str, bot_response: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     conn.execute(
         "INSERT INTO history (user_message, bot_response) VALUES (?, ?)",
         (user_message, bot_response)
@@ -27,17 +23,15 @@ def save_message(user_message: str, bot_response: str):
     conn.close()
 
 def get_history():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_conn()
     rows = conn.execute("SELECT * FROM history ORDER BY id DESC").fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
 def get_recent_history(limit: int = 10):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_conn()
     rows = conn.execute(
         "SELECT * FROM history ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()
     conn.close()
-    return [dict(row) for row in reversed(rows)]  # oldest first
+    return [dict(row) for row in reversed(rows)]
