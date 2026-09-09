@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mechanic Chat</title>
+<style>
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column; background: #16181d; color: #e8e6e0; font-family: sans-serif; }
+  #messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 70%; padding: 10px 14px; border-radius: 10px; font-size: 14px; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: #2a2e37; }
+  .msg.llm { align-self: flex-start; background: #1d2027; }
+  .status { text-align: center; font-size: 12px; color: #8b8f9a; padding: 6px; }
+  #input-row { display: flex; padding: 14px; border-top: 1px solid #2a2e37; gap: 8px; }
+  #phone { width: 140px; padding: 10px; border-radius: 8px; border: none; background: #1d2027; color: #e8e6e0; }
+  #text { flex: 1; padding: 10px; border-radius: 8px; border: none; background: #1d2027; color: #e8e6e0; }
+  button { background: #5eb8a3; border: none; border-radius: 8px; padding: 0 18px; cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div id="messages"></div>
+
+<div id="input-row">
+  <input id="phone" placeholder="Phone (e.g. 923...)" value="923004499554">
+  <input id="text" placeholder="Type as the mechanic...">
+  <button onclick="send()">Send</button>
+</div>
+
+<script>
+function addMsg(role, text) {
+  const box = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg ' + (role === 'mechanic' ? 'user' : 'llm');
+  div.textContent = text;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function addStatus(text) {
+  const box = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'status';
+  div.textContent = text;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function send() {
+  const phone = document.getElementById('phone').value.trim();
+  const textInput = document.getElementById('text');
+  const text = textInput.value.trim();
+  if (!text || !phone) return;
+
+  addMsg('mechanic', text);
+  textInput.value = '';
+
+  const res = await fetch('/mechanic-message', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({phone, text})
+  });
+  const data = await res.json();
+
+  if (data.status === 'clarifying') {
+    addStatus('Missing: ' + data.missing.join(', '));
+  } else if (data.status === 'ready_for_dealers') {
+    addStatus('All fields collected — moving to dealer stage');
+  }
+}
+
+document.getElementById('text').addEventListener('keydown', e => {
+  if (e.key === 'Enter') send();
+});
+</script>
+
+</body>
+</html>

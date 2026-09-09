@@ -7,7 +7,7 @@ from memory import with_memory
 
 router = APIRouter()
 
-LLM_URL = "https://mayflower-lily-clique.ngrok-free.dev/generate"
+LLM_URL = "https://phenomenally-slavish-lilly.ngrok-free.dev/generate"
 
 class Message(BaseModel):
     text: str
