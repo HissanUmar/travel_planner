@@ -61,10 +61,15 @@ async function send() {
   });
   const data = await res.json();
 
+  if (data.message) {
+    addMsg('llm', data.message);
+  }
   if (data.status === 'clarifying') {
     addStatus('Missing: ' + data.missing.join(', '));
-  } else if (data.status === 'ready_for_dealers') {
-    addStatus('All fields collected — moving to dealer stage');
+  } else if (data.status === 'awaiting_confirmation') {
+    addStatus('Reply YES to confirm, or correct any detail');
+  } else if (data.status === 'confirmed') {
+    addStatus('Confirmed — moving to dealer stage');
   }
 }
 

@@ -16,7 +16,6 @@ def with_memory(limit: int = 10):
             db.save_message(msg.text, str(response))
             return response
 
-        # expose only `msg` to FastAPI's route introspection
         wrapper.__name__ = func.__name__
         wrapper.__signature__ = inspect.Signature(
             parameters=[inspect.signature(func).parameters["msg"]]

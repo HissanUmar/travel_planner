@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mechanic Dashboard</title>
+<style>
+  :root { --bg: #16181d; --panel: #1d2027; --border: #2a2e37; --text: #e8e6e0; --muted: #8b8f9a; --accent: #5eb8a3; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; background: var(--bg); color: var(--text); font-family: sans-serif; }
+
+  #sidebar { width: 300px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+  #sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+  #sidebar-header h2 { margin: 0 0 10px; font-size: 16px; }
+  #new-request-row { display: flex; gap: 6px; }
+  #phone-input { flex: 1; padding: 8px; border-radius: 6px; border: none; background: var(--panel); color: var(--text); font-size: 12px; }
+  #new-btn { background: var(--accent); border: none; border-radius: 6px; padding: 0 12px; cursor: pointer; font-weight: 600; }
+
+  #request-list { flex: 1; overflow-y: auto; }
+  .req-item { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; position: relative; }
+  .req-item:hover, .req-item.active { background: var(--panel); }
+  .req-title { font-size: 14px; font-weight: 600; }
+  .req-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); position: absolute; right: 14px; top: 16px; }
+
+  #chat { flex: 1; display: flex; flex-direction: column; }
+  #chat-header { padding: 14px 20px; border-bottom: 1px solid var(--border); font-weight: 600; }
+  #chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+  .bubble { max-width: 65%; padding: 9px 13px; border-radius: 10px; font-size: 14px; white-space: pre-wrap; line-height: 1.4; }
+  .bubble.mechanic { align-self: flex-end; background: #2a2e37; }
+  .bubble.llm { align-self: flex-start; background: #1d2027; }
+  .bubble.update { align-self: center; background: #143d33; color: #8fe0c8; font-size: 13px; }
+
+  #chat-input-row { display: flex; padding: 12px; border-top: 1px solid var(--border); gap: 8px; }
+  #chat-input-row input { flex: 1; padding: 10px; border-radius: 8px; border: none; background: var(--panel); color: var(--text); }
+  #chat-input-row button { background: var(--accent); border: none; border-radius: 8px; padding: 0 18px; cursor: pointer; font-weight: 600; }
+
+  #empty-chat { margin: auto; color: var(--muted); }
+  .waiting-note { text-align: center; color: var(--muted); font-size: 13px; padding: 10px; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div id="sidebar-header">
+    <h2>My Requests</h2>
+    <div id="new-request-row">
+      <input id="phone-input" placeholder="Your phone (e.g. 923...)" value="923004499554">
+      <button id="new-btn" onclick="startNewRequest()">+ New</button>
+    </div>
+  </div>
+  <div id="request-list"></div>
+</div>
+
+<div id="chat">
+  <div id="chat-header">Select a request</div>
+  <div id="chat-messages"><div id="empty-chat">No request selected</div></div>
+  <div id="chat-input-row" style="display:none;">
+    <input id="msg-input" placeholder="Type a message...">
+    <button onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
+<script>
+let activeRequestId = null;
+let knownUnread = {};
+
+if ("Notification" in window && Notification.permission === "default") {
+  Notification.requestPermission();
+}
+
+function requestTitle(req) {
+  if (req.part_name && req.car_model) return `${req.car_model} — ${req.part_name}`;
+  if (req.part_name) return req.part_name;
+  return `New request #${req.id}`;
+}
+
+function requestSubtitle(req) {
+  const statusLabels = {
+    COLLECTING_INFO: "In progress",
+    AWAITING_CONFIRMATION: "Awaiting your confirmation",
+    BROADCASTING: "Checking with dealers",
+    REPORT_READY: "Report ready",
+    ORDER_CONFIRMING: "Confirming order",
+    ORDER_PLACED: "Order placed"
+  };
+  return statusLabels[req.status] || req.status;
+}
+
+async function loadRequests() {
+  const phone = document.getElementById('phone-input').value.trim();
+  if (!phone) return;
+  const res = await fetch(`/mechanic-requests?phone=${phone}`);
+  const requests = await res.json();
+
+  const list = document.getElementById('request-list');
+  list.innerHTML = '';
+
+  requests.forEach(req => {
+    const item = document.createElement('div');
+    item.className = 'req-item' + (req.id === activeRequestId ? ' active' : '');
+    item.innerHTML = `
+      <div class="req-title">${requestTitle(req)}</div>
+      <div class="req-sub">${requestSubtitle(req)}</div>
+      ${req.has_unread ? '<div class="unread-dot"></div>' : ''}
+    `;
+    item.onclick = () => openRequest(req.id);
+    list.appendChild(item);
+
+    if (req.has_unread && !knownUnread[req.id]) {
+      knownUnread[req.id] = true;
+      if (document.hidden && Notification.permission === "granted") {
+        new Notification("Update on " + requestTitle(req), { body: "Tap to view" });
+      }
+    }
+    if (!req.has_unread) knownUnread[req.id] = false;
+  });
+}
+
+async function openRequest(id) {
+  activeRequestId = id;
+  document.getElementById('chat-input-row').style.display = 'flex';
+
+  await fetch(`/mechanic-requests/${id}/mark-read`, { method: 'POST' });
+
+  const res = await fetch(`/mechanic-requests/${id}`);
+  const req = await res.json();
+
+  document.getElementById('chat-header').textContent = requestTitle(req);
+
+  const box = document.getElementById('chat-messages');
+  box.innerHTML = '';
+  req.conversation.forEach(m => {
+    const bubble = document.createElement('div');
+    const isUpdate = m.role === 'llm' && m.text.startsWith('Update:');
+    bubble.className = 'bubble ' + (isUpdate ? 'update' : (m.role === 'mechanic' ? 'mechanic' : 'llm'));
+    bubble.textContent = m.text;
+    box.appendChild(bubble);
+  });
+
+    if (['BROADCASTING', 'REPORT_READY', 'ORDER_CONFIRMING', 'ORDER_PLACED'].includes(req.status)) {
+    document.getElementById('chat-input-row').style.display = 'none';
+    const box = document.getElementById('chat-messages');
+    const actions = document.createElement('div');
+    actions.className = 'waiting-note';
+    actions.innerHTML = `
+        <button onclick="cancelRequest(${req.id})">Cancel this request</button>
+        <button onclick="pingDealers(${req.id})">Any update?</button>
+    `;
+    box.appendChild(actions);
+    }
+
+  box.scrollTop = box.scrollHeight;
+  loadRequests();
+}
+
+async function sendMessage() {
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  const phone = document.getElementById('phone-input').value.trim();
+  if (!text || !phone) return;
+
+  input.value = '';
+
+  await fetch('/mechanic-message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, text })
+  });
+
+  async function cancelRequest(id) {
+  await fetch(`/mechanic-requests/${id}/cancel`, { method: 'POST' });
+  openRequest(id);
+}
+
+async function pingDealers(id) {
+  const res = await fetch(`/mechanic-requests/${id}/ping-dealers`, { method: 'POST' });
+  const data = await res.json();
+  alert(`Pinged ${data.count} dealer(s)`);
+  openRequest(id);
+}
+
+  // after sending, the active request might have advanced (new one created, or same one updated)
+  const res = await fetch(`/mechanic-requests?phone=${phone}`);
+  const requests = await res.json();
+  if (requests.length) {
+    activeRequestId = requests[0].id; // most recent
+    openRequest(activeRequestId);
+  }
+}
+
+function startNewRequest() {
+  activeRequestId = null;
+  document.getElementById('chat-header').textContent = 'New request';
+  document.getElementById('chat-messages').innerHTML = '<div id="empty-chat">Type your first message below to start</div>';
+  document.getElementById('chat-input-row').style.display = 'flex';
+}
+
+document.getElementById('msg-input')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendMessage();
+});
+document.addEventListener('keydown', e => {
+  if (e.target.id === 'msg-input' && e.key === 'Enter') sendMessage();
+});
+
+loadRequests();
+setInterval(() => {
+  const inputHasFocus = document.activeElement === document.getElementById('msg-input');
+  loadRequests();
+  if (activeRequestId && !inputHasFocus) openRequest(activeRequestId);
+}, 4000);
+</script>
+
+</body>
+</html>

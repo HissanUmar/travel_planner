@@ -2,12 +2,11 @@ from fastapi import APIRouter
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import requests
+from config import LLM_URL
 import db
 from memory import with_memory
 
 router = APIRouter()
-
-LLM_URL = "https://phenomenally-slavish-lilly.ngrok-free.dev/generate"
 
 class Message(BaseModel):
     text: str

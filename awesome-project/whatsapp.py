@@ -2,7 +2,6 @@ import requests
 import os
 from dotenv import load_dotenv
 
-# Load variables from .env file into os.environ
 load_dotenv()
 
 PHONE_NUMBER_ID = os.environ["WA_PHONE_NUMBER_ID"]
@@ -19,15 +18,14 @@ def send_message(to: str, text: str):
         "text": {"body": text}
     }
     r = requests.post(url, headers=headers, json=payload)
-    print(r.status_code, r.json())  # temporary debug line
     r.raise_for_status()
     return r.json()
 
 def extract_incoming(body: dict):
-    """Returns (from_number, text) or (None, None) if not a text message."""
+    """Returns (from_number, text, message_id) or (None, None, None) if not a text message."""
     try:
         value = body["entry"][0]["changes"][0]["value"]
         message = value["messages"][0]
-        return message["from"], message["text"]["body"]
+        return message["from"], message["text"]["body"], message["id"]
     except (KeyError, IndexError):
-        return None, None
+        return None, None, None
