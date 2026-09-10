@@ -14,13 +14,18 @@ def init_requests_table():
                 status TEXT DEFAULT 'COLLECTING_INFO',
                 conversation TEXT DEFAULT '[]',
                 has_unread INTEGER DEFAULT 0,
+                pending_dealer_question TEXT DEFAULT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        try:
-            conn.execute("ALTER TABLE part_requests ADD COLUMN has_unread INTEGER DEFAULT 0")
-        except Exception:
-            pass
+        for col, definition in [
+            ("has_unread", "INTEGER DEFAULT 0"),
+            ("pending_dealer_question", "TEXT DEFAULT NULL")
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE part_requests ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
 
 def mark_unread(request_id: int):
     with get_conn() as conn:
@@ -29,6 +34,15 @@ def mark_unread(request_id: int):
 def mark_read(request_id: int):
     with get_conn() as conn:
         conn.execute("UPDATE part_requests SET has_unread = 0 WHERE id = ?", (request_id,))
+
+def set_pending_dealer_question(request_id: int, thread_id: int, shop_name: str, question: str):
+    payload = json.dumps({"thread_id": thread_id, "shop_name": shop_name, "question": question})
+    with get_conn() as conn:
+        conn.execute("UPDATE part_requests SET pending_dealer_question = ? WHERE id = ?", (payload, request_id))
+
+def clear_pending_dealer_question(request_id: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE part_requests SET pending_dealer_question = NULL WHERE id = ?", (request_id,))
 
 def get_open_request(phone: str):
     with get_conn() as conn:
@@ -44,11 +58,14 @@ def create_request(phone: str):
         req_id = cur.lastrowid
     return req_id
 
-def append_conversation(request_id: int, role: str, text: str):
+def append_conversation(request_id: int, role: str, text: str, msg_type: str = "text", thread_id: int = None):
     with get_conn() as conn:
         row = conn.execute("SELECT conversation FROM part_requests WHERE id = ?", (request_id,)).fetchone()
         convo = json.loads(row["conversation"])
-        convo.append({"role": role, "text": text})
+        entry = {"role": role, "text": text, "type": msg_type}
+        if thread_id is not None:
+            entry["thread_id"] = thread_id
+        convo.append(entry)
         conn.execute("UPDATE part_requests SET conversation = ? WHERE id = ?", (json.dumps(convo), request_id))
 
 def update_fields(request_id: int, fields: dict):

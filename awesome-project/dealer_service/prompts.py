@@ -33,3 +33,27 @@ You're knowledgeable about the auto parts market: genuine vs aftermarket pricing
 Their message: "{text}"
 
 Reply helpfully and briefly:"""
+
+def build_dealer_classify_prompt(request: dict, thread: dict, text: str) -> str:
+    return f"""A dealer is replying about a part request:
+Part requested: {request.get('part_name')} for {request.get('car_model')} {request.get('car_variant')} ({request.get('car_year')})
+Preference: {request.get('genuine_pref')}
+
+Their message: "{text}"
+
+Classify this message as ONE of:
+- ANSWERING_AVAILABILITY (stating whether they have it, price, genuine/aftermarket)
+- ASKING_QUESTION (asking us something back — needs the mechanic to answer)
+- OFFERING_ALTERNATIVE (offering a different part/spec/brand than what was requested)
+
+Reply with ONLY the label.
+Label:"""
+
+def build_extract_alternative_prompt(text: str) -> str:
+    return f"""A dealer offered an alternative to what was requested. Their message: "{text}"
+
+Extract as JSON:
+- description: string (what they're offering instead)
+- price: number/null
+
+JSON:"""

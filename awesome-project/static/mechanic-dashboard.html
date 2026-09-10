@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <title>Mechanic Dashboard</title>
 <style>
-  :root { --bg: #16181d; --panel: #1d2027; --border: #2a2e37; --text: #e8e6e0; --muted: #8b8f9a; --accent: #5eb8a3; }
+  :root { --bg: #16181d; --panel: #1d2027; --border: #2a2e37; --text: #e8e6e0; --muted: #8b8f9a; --accent: #5eb8a3; --warn: #d9a441; }
   * { box-sizing: border-box; }
   body { margin: 0; height: 100vh; display: flex; background: var(--bg); color: var(--text); font-family: sans-serif; }
 
@@ -30,12 +30,37 @@
   .bubble.llm { align-self: flex-start; background: #1d2027; }
   .bubble.update { align-self: center; background: #143d33; color: #8fe0c8; font-size: 13px; }
 
+  .question-card { align-self: center; background: #3a2f14; color: #f0d090; border-radius: 10px; padding: 12px; max-width: 80%; }
+  .question-card .q-actions { margin-top: 8px; display: flex; gap: 6px; }
+  .question-card input { flex: 1; padding: 6px; border-radius: 6px; border: none; background: var(--bg); color: var(--text); font-size: 12px; }
+  .question-card button { border: none; border-radius: 6px; padding: 0 10px; cursor: pointer; font-size: 12px; background: var(--warn); font-weight: 600; }
+
+  .alt-card { align-self: center; background: #1a2e3a; color: #90c8f0; border-radius: 10px; padding: 12px; max-width: 80%; }
+  .alt-card .alt-actions { margin-top: 8px; display: flex; gap: 6px; }
+  .alt-card button { border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+  .btn-pursue { background: var(--accent); font-weight: 600; }
+  .btn-decline { background: #2a2e37; color: var(--text); }
+
   #chat-input-row { display: flex; padding: 12px; border-top: 1px solid var(--border); gap: 8px; }
   #chat-input-row input { flex: 1; padding: 10px; border-radius: 8px; border: none; background: var(--panel); color: var(--text); }
   #chat-input-row button { background: var(--accent); border: none; border-radius: 8px; padding: 0 18px; cursor: pointer; font-weight: 600; }
+  #input-mode-label { font-size: 11px; color: var(--muted); padding: 0 12px; }
 
   #empty-chat { margin: auto; color: var(--muted); }
   .waiting-note { text-align: center; color: var(--muted); font-size: 13px; padding: 10px; }
+
+  .offers-panel { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
+  .offers-heading { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  .offer-card { background: var(--panel); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .offer-status { font-size: 13px; }
+  .offer-actions { margin-top: 8px; display: flex; gap: 6px; }
+  .offer-actions input { flex: 1; padding: 6px; border-radius: 6px; border: none; background: var(--bg); color: var(--text); font-size: 12px; }
+  .offer-actions button { border: none; border-radius: 6px; padding: 0 10px; cursor: pointer; font-size: 12px; }
+  .btn-negotiate { background: #2a2e37; color: var(--text); }
+  .btn-confirm { background: var(--accent); font-weight: 600; }
+
+  .top-actions { display: flex; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--border); }
+  .top-actions button { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -53,6 +78,10 @@
 
 <div id="chat">
   <div id="chat-header">Select a request</div>
+  <div id="top-actions" class="top-actions" style="display:none;">
+    <button onclick="pingDealers()">Any update?</button>
+    <button onclick="cancelRequest()">Cancel request</button>
+  </div>
   <div id="chat-messages"><div id="empty-chat">No request selected</div></div>
   <div id="chat-input-row" style="display:none;">
     <input id="msg-input" placeholder="Type a message...">
@@ -79,9 +108,9 @@ function requestSubtitle(req) {
     COLLECTING_INFO: "In progress",
     AWAITING_CONFIRMATION: "Awaiting your confirmation",
     BROADCASTING: "Checking with dealers",
-    REPORT_READY: "Report ready",
-    ORDER_CONFIRMING: "Confirming order",
-    ORDER_PLACED: "Order placed"
+    REPORT_READY: "Offers ready",
+    TICKET_CREATED: "Ticket created",
+    CANCELLED: "Cancelled"
   };
   return statusLabels[req.status] || req.status;
 }
@@ -116,9 +145,42 @@ async function loadRequests() {
   });
 }
 
+function renderBubble(m) {
+  if (m.type === 'dealer_question') {
+    const card = document.createElement('div');
+    card.className = 'question-card';
+    card.innerHTML = `
+      <div>${m.text}</div>
+      <div class="q-actions">
+        <input id="answer-${m.thread_id}" placeholder="Your answer...">
+        <button onclick="answerDealerQuestion(${m.thread_id})">Send</button>
+      </div>
+    `;
+    return card;
+  }
+
+  if (m.type === 'alternative_offer') {
+    const card = document.createElement('div');
+    card.className = 'alt-card';
+    card.innerHTML = `
+      <div>${m.text}</div>
+      <div class="alt-actions">
+        <button class="btn-pursue" onclick="pursueAlternative(${m.thread_id})">Ask for details</button>
+        <button class="btn-decline" onclick="declineAlternative(${m.thread_id})">Not interested</button>
+      </div>
+    `;
+    return card;
+  }
+
+  const bubble = document.createElement('div');
+  const isUpdate = m.type === 'update' || (m.role === 'llm' && m.text.startsWith('Update:'));
+  bubble.className = 'bubble ' + (isUpdate ? 'update' : (m.role === 'mechanic' ? 'mechanic' : 'llm'));
+  bubble.textContent = m.text;
+  return bubble;
+}
+
 async function openRequest(id) {
   activeRequestId = id;
-  document.getElementById('chat-input-row').style.display = 'flex';
 
   await fetch(`/mechanic-requests/${id}/mark-read`, { method: 'POST' });
 
@@ -129,28 +191,137 @@ async function openRequest(id) {
 
   const box = document.getElementById('chat-messages');
   box.innerHTML = '';
-  req.conversation.forEach(m => {
-    const bubble = document.createElement('div');
-    const isUpdate = m.role === 'llm' && m.text.startsWith('Update:');
-    bubble.className = 'bubble ' + (isUpdate ? 'update' : (m.role === 'mechanic' ? 'mechanic' : 'llm'));
-    bubble.textContent = m.text;
-    box.appendChild(bubble);
-  });
+  req.conversation.forEach(m => box.appendChild(renderBubble(m)));
 
-    if (['BROADCASTING', 'REPORT_READY', 'ORDER_CONFIRMING', 'ORDER_PLACED'].includes(req.status)) {
-    document.getElementById('chat-input-row').style.display = 'none';
-    const box = document.getElementById('chat-messages');
-    const actions = document.createElement('div');
-    actions.className = 'waiting-note';
-    actions.innerHTML = `
-        <button onclick="cancelRequest(${req.id})">Cancel this request</button>
-        <button onclick="pingDealers(${req.id})">Any update?</button>
-    `;
-    box.appendChild(actions);
-    }
+  const editable = ['COLLECTING_INFO', 'AWAITING_CONFIRMATION'].includes(req.status);
+  const canAsk = ['BROADCASTING', 'REPORT_READY'].includes(req.status);
+
+  document.getElementById('chat-input-row').style.display = (editable || canAsk) ? 'flex' : 'none';
+  document.getElementById('msg-input').placeholder = editable ? 'Type a message...' : 'Ask a question about this request...';
+  document.getElementById('top-actions').style.display = canAsk ? 'flex' : 'none';
+
+  if (req.status === 'BROADCASTING') {
+    const note = document.createElement('div');
+    note.className = 'waiting-note';
+    note.textContent = 'Waiting on dealer replies — updates will appear here automatically.';
+    box.appendChild(note);
+  }
+
+  if (['BROADCASTING', 'REPORT_READY', 'TICKET_CREATED'].includes(req.status)) {
+    await renderOffers(id);
+  }
 
   box.scrollTop = box.scrollHeight;
   loadRequests();
+}
+
+async function renderOffers(requestId) {
+  const res = await fetch(`/dealer-threads/${requestId}`);
+  const threads = await res.json();
+  const box = document.getElementById('chat-messages');
+
+  const panel = document.createElement('div');
+  panel.className = 'offers-panel';
+
+  const heading = document.createElement('div');
+  heading.className = 'offers-heading';
+  heading.textContent = 'Dealer offers';
+  panel.appendChild(heading);
+
+  if (threads.length === 0) {
+    const none = document.createElement('div');
+    none.className = 'waiting-note';
+    none.textContent = 'No dealers contacted yet.';
+    panel.appendChild(none);
+  }
+
+  threads.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'offer-card';
+
+    let statusLine, actionsHtml = '';
+
+    if (t.status === 'REJECTED') {
+      statusLine = `<b>${t.shop_name}</b> — Unavailable`;
+    } else if (t.status === 'CLOSED') {
+      statusLine = `<b>${t.shop_name}</b> — Declined (another dealer chosen)`;
+    } else if (t.status === 'NO_RESPONSE') {
+      statusLine = `<b>${t.shop_name}</b> — No response`;
+    } else if (t.status === 'AWAITING_MECHANIC_INPUT') {
+      statusLine = `<b>${t.shop_name}</b> — Waiting on your answer above`;
+    } else if (t.status === 'SELECTED') {
+      statusLine = `<b>${t.shop_name}</b> — PKR ${t.price} (${t.is_genuine === 'True' ? 'genuine' : 'aftermarket'}) — ✅ Confirmed`;
+    } else if (t.price) {
+      statusLine = `<b>${t.shop_name}</b> — PKR ${t.price} (${t.is_genuine === 'True' ? 'genuine' : 'aftermarket'})`;
+      actionsHtml = `
+        <div class="offer-actions">
+          <input id="neg-${t.id}" placeholder="Counter-offer or question...">
+          <button class="btn-negotiate" onclick="negotiate(${t.id})">Negotiate</button>
+          <button class="btn-confirm" onclick="confirmOffer(${t.id})">Confirm</button>
+        </div>`;
+    } else {
+      statusLine = `<b>${t.shop_name}</b> — Waiting for response...`;
+    }
+
+    card.innerHTML = `<div class="offer-status">${statusLine}</div>${actionsHtml}`;
+    panel.appendChild(card);
+  });
+
+  box.appendChild(panel);
+}
+
+async function answerDealerQuestion(threadId) {
+  const input = document.getElementById(`answer-${threadId}`);
+  const text = input.value.trim();
+  if (!text) return;
+  const phone = document.getElementById('phone-input').value.trim();
+  await fetch('/mechanic-message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, text })
+  });
+  openRequest(activeRequestId);
+}
+
+async function pursueAlternative(threadId) {
+  await fetch(`/dealer-threads/${threadId}/pursue-alternative`, { method: 'POST' });
+  openRequest(activeRequestId);
+}
+
+async function declineAlternative(threadId) {
+  await fetch(`/dealer-threads/${threadId}/decline-alternative`, { method: 'POST' });
+  openRequest(activeRequestId);
+}
+
+async function negotiate(threadId) {
+  const input = document.getElementById(`neg-${threadId}`);
+  const text = input.value.trim();
+  if (!text) return;
+  await fetch(`/dealer-threads/${threadId}/negotiate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
+  });
+  openRequest(activeRequestId);
+}
+
+async function confirmOffer(threadId) {
+  if (!confirm('Confirm this offer? This will decline other dealers for this request.')) return;
+  await fetch(`/dealer-threads/${threadId}/confirm`, { method: 'POST' });
+  openRequest(activeRequestId);
+}
+
+async function pingDealers() {
+  const res = await fetch(`/mechanic-requests/${activeRequestId}/ping-dealers`, { method: 'POST' });
+  const data = await res.json();
+  alert(`Pinged ${data.count} dealer(s)`);
+  openRequest(activeRequestId);
+}
+
+async function cancelRequest() {
+  if (!confirm('Cancel this request?')) return;
+  await fetch(`/mechanic-requests/${activeRequestId}/cancel`, { method: 'POST' });
+  openRequest(activeRequestId);
 }
 
 async function sendMessage() {
@@ -167,23 +338,11 @@ async function sendMessage() {
     body: JSON.stringify({ phone, text })
   });
 
-  async function cancelRequest(id) {
-  await fetch(`/mechanic-requests/${id}/cancel`, { method: 'POST' });
-  openRequest(id);
-}
-
-async function pingDealers(id) {
-  const res = await fetch(`/mechanic-requests/${id}/ping-dealers`, { method: 'POST' });
-  const data = await res.json();
-  alert(`Pinged ${data.count} dealer(s)`);
-  openRequest(id);
-}
-
-  // after sending, the active request might have advanced (new one created, or same one updated)
   const res = await fetch(`/mechanic-requests?phone=${phone}`);
   const requests = await res.json();
   if (requests.length) {
-    activeRequestId = requests[0].id; // most recent
+    const stillSameOrNewer = activeRequestId && requests.find(r => r.id === activeRequestId);
+    activeRequestId = stillSameOrNewer ? activeRequestId : requests[0].id;
     openRequest(activeRequestId);
   }
 }
@@ -191,22 +350,22 @@ async function pingDealers(id) {
 function startNewRequest() {
   activeRequestId = null;
   document.getElementById('chat-header').textContent = 'New request';
+  document.getElementById('top-actions').style.display = 'none';
   document.getElementById('chat-messages').innerHTML = '<div id="empty-chat">Type your first message below to start</div>';
   document.getElementById('chat-input-row').style.display = 'flex';
+  document.getElementById('msg-input').placeholder = 'Type a message...';
 }
 
 document.getElementById('msg-input')?.addEventListener('keydown', e => {
   if (e.key === 'Enter') sendMessage();
 });
-document.addEventListener('keydown', e => {
-  if (e.target.id === 'msg-input' && e.key === 'Enter') sendMessage();
-});
 
 loadRequests();
 setInterval(() => {
-  const inputHasFocus = document.activeElement === document.getElementById('msg-input');
+  const active = document.activeElement;
+  const typing = active && (active.id === 'msg-input' || (active.id && (active.id.startsWith('neg-') || active.id.startsWith('answer-'))));
   loadRequests();
-  if (activeRequestId && !inputHasFocus) openRequest(activeRequestId);
+  if (activeRequestId && !typing) openRequest(activeRequestId);
 }, 4000);
 </script>
 

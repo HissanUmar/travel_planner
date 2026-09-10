@@ -3,7 +3,11 @@ import whatsapp
 import json
 from datetime import datetime
 from llm_service import call_llm, extract_json
-from .prompts import build_outreach_message, build_parse_prompt, build_dealer_persona_prompt
+from .prompts import (
+    build_outreach_message, build_parse_prompt, build_dealer_persona_prompt,
+    build_extract_alternative_prompt
+)
+from .intent import classify_dealer_message
 
 def broadcast_to_dealers(request: dict) -> list:
     shops = db.find_shops_for_part(request["part_name"])
@@ -38,35 +42,27 @@ def forward_update_to_mechanic(thread: dict, parsed: dict):
             parts.append(f"({'genuine' if parsed['is_genuine'] else 'aftermarket'})")
         if parsed.get("price"):
             parts.append(f"— PKR {parsed['price']}")
-        else:
-            parts.append("— price pending")
         summary = " ".join(parts)
-    db.append_conversation(thread["request_id"], "llm", summary)
+    db.append_conversation(thread["request_id"], "llm", summary, msg_type="update")
     db.mark_unread(thread["request_id"])
 
 def decide_next_step(parsed: dict) -> dict:
-    """Code-level decision, not left to the LLM's own judgment — determines exactly
-    what's still missing and what to ask, given what's confirmed available."""
     if parsed.get("available") is False:
         return {"complete": True, "question": None}
-
     missing = []
     if parsed.get("price") is None:
         missing.append("price")
     if parsed.get("is_genuine") is None:
         missing.append("whether it's genuine or aftermarket")
-
     if not missing:
         return {"complete": True, "question": None}
+    return {"complete": False, "question": "Could you also let me know " + " and ".join(missing) + "?"}
 
-    question = "Could you also let me know " + " and ".join(missing) + "?"
-    return {"complete": False, "question": question}
-
-def handle_dealer_reply(thread: dict, text: str) -> str:
+def handle_availability_reply(thread: dict, text: str) -> str:
     db.append_thread_conversation(thread["id"], "dealer", text)
 
-    refreshed = db.get_open_thread_by_phone(thread["shop_phone"])
-    conversation = json.loads(refreshed["conversation"]) if refreshed else json.loads(thread["conversation"])
+    refreshed = db.get_thread(thread["id"])
+    conversation = json.loads(refreshed["conversation"])
 
     try:
         parsed = extract_json(call_llm(build_parse_prompt(conversation)))
@@ -92,14 +88,82 @@ def handle_dealer_reply(thread: dict, text: str) -> str:
     )
 
     decision = decide_next_step(parsed)
-
     if not decision["complete"]:
         reply = decision["question"]
         db.append_thread_conversation(thread["id"], "llm", reply)
         return reply
 
-    # complete — price and genuine/aftermarket both known, safe to forward to mechanic
     forward_update_to_mechanic(thread, parsed)
     reply = "Great, thank you! Let me confirm this with the mechanic and I'll get back to you shortly."
     db.append_thread_conversation(thread["id"], "llm", reply)
     return reply
+
+def handle_dealer_question(thread: dict, request: dict, text: str) -> str:
+    db.append_thread_conversation(thread["id"], "dealer", text, msg_type="question")
+    db.set_pending_mechanic_question(thread["id"], text)
+    db.set_pending_dealer_question(request["id"], thread["id"], thread["shop_name"], text)
+    db.append_conversation(
+        request["id"], "llm",
+        f"❓ {thread['shop_name']} is asking: {text}",
+        msg_type="dealer_question", thread_id=thread["id"]
+    )
+    db.mark_unread(request["id"])
+    reply = "Let me check with the mechanic and get back to you."
+    db.append_thread_conversation(thread["id"], "llm", reply)
+    return reply
+
+def handle_alternative_offer(thread: dict, request: dict, text: str) -> str:
+    db.append_thread_conversation(thread["id"], "dealer", text, msg_type="alternative")
+    try:
+        offer = extract_json(call_llm(build_extract_alternative_prompt(text)))
+    except Exception:
+        offer = {"description": text, "price": None}
+
+    db.set_alternative_offer(thread["id"], offer)
+    summary = f"🔄 {thread['shop_name']} offered an alternative: {offer.get('description', text)}"
+    if offer.get("price"):
+        summary += f" — PKR {offer['price']}"
+    db.append_conversation(
+        request["id"], "llm", summary,
+        msg_type="alternative_offer", thread_id=thread["id"]
+    )
+    db.mark_unread(request["id"])
+    reply = "Thanks, I'll pass this alternative along to the mechanic."
+    db.append_thread_conversation(thread["id"], "llm", reply)
+    return reply
+
+def handle_dealer_reply(thread: dict, text: str) -> str:
+    request = db.get_request(thread["request_id"])
+    if not request:
+        return "Got it, thanks."
+
+    intent = classify_dealer_message(request, thread, text)
+
+    if intent == "ASKING_QUESTION":
+        return handle_dealer_question(thread, request, text)
+
+    if intent == "OFFERING_ALTERNATIVE":
+        return handle_alternative_offer(thread, request, text)
+
+    return handle_availability_reply(thread, text)
+
+def send_mechanic_answer_to_dealer(thread_id: int, answer_text: str):
+    thread = db.get_thread(thread_id)
+    if not thread:
+        return
+    whatsapp.send_message(thread["shop_phone"], answer_text)
+    db.append_thread_conversation(thread_id, "llm", answer_text)
+    # revert to whatever made sense before the question — RESPONDED is a safe general default
+    revert_status = "RESPONDED" if thread.get("price") or thread.get("is_genuine") else "CONTACTED"
+    db.clear_pending_mechanic_question(thread_id, revert_status)
+
+def check_stale_threads(hours: int = 6) -> int:
+    stale = db.get_stale_threads(hours)
+    for thread in stale:
+        db.close_stale_thread(thread["id"])
+        request = db.get_request(thread["request_id"])
+        if request:
+            summary = f"Update: {thread['shop_name']} did not respond within {hours} hours — marked as no response."
+            db.append_conversation(thread["request_id"], "llm", summary, msg_type="update")
+            db.mark_unread(thread["request_id"])
+    return len(stale)
