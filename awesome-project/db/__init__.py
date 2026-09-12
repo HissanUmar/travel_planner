@@ -4,6 +4,15 @@ from .whatsapp import (
     init_whatsapp_table, save_whatsapp_message, get_conversations,
     get_messages, message_already_processed
 )
+
+from .dealer_threads import (
+    init_dealer_threads_table, create_thread, append_thread_conversation,
+    get_open_thread_by_phone, update_thread, get_threads_for_request,
+    get_stale_threads, close_stale_thread, get_thread, close_other_threads,
+    set_pending_mechanic_question, clear_pending_mechanic_question, set_alternative_offer,
+    mark_thread_unread, mark_thread_read
+)
+
 from .requests import (
     init_requests_table, get_open_request, create_request,
     append_conversation, update_fields, set_status, get_request,

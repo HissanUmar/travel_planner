@@ -106,3 +106,44 @@ def get_stale_threads(hours: int = 6):
 def close_stale_thread(thread_id: int):
     with get_conn() as conn:
         conn.execute("UPDATE dealer_threads SET status = 'NO_RESPONSE' WHERE id = ?", (thread_id,))
+
+
+def init_dealer_threads_table():
+    with get_conn() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS dealer_threads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id INTEGER,
+                shop_id INTEGER,
+                shop_name TEXT,
+                shop_phone TEXT,
+                status TEXT DEFAULT 'CONTACTED',
+                is_genuine TEXT,
+                price REAL,
+                notes TEXT,
+                conversation TEXT DEFAULT '[]',
+                last_outbound_msg_id TEXT,
+                pending_mechanic_question TEXT DEFAULT NULL,
+                alternative_offer TEXT DEFAULT NULL,
+                has_unread INTEGER DEFAULT 0,
+                contacted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                replied_at DATETIME
+            )
+        """)
+        for col, definition in [
+            ("pending_mechanic_question", "TEXT DEFAULT NULL"),
+            ("alternative_offer", "TEXT DEFAULT NULL"),
+            ("has_unread", "INTEGER DEFAULT 0")
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE dealer_threads ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
+
+def mark_thread_unread(thread_id: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE dealer_threads SET has_unread = 1 WHERE id = ?", (thread_id,))
+
+def mark_thread_read(thread_id: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE dealer_threads SET has_unread = 0 WHERE id = ?", (thread_id,))

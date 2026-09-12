@@ -2,12 +2,21 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import db
 import whatsapp
+import json
 from .logic import broadcast_to_dealers
 
 router = APIRouter()
 
 class NegotiateMessage(BaseModel):
     text: str
+
+@router.get("/dealer-threads/thread/{thread_id}")
+async def get_thread_detail(thread_id: int):
+    thread = db.get_thread(thread_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail="thread not found")
+    thread["conversation"] = json.loads(thread["conversation"])
+    return thread
 
 @router.get("/dealer-threads/{request_id}")
 async def get_dealer_threads(request_id: int):
@@ -71,3 +80,8 @@ async def decline_alternative(thread_id: int):
     whatsapp.send_message(thread["shop_phone"], "Thanks for the offer, but the mechanic needs the exact part as requested.")
     db.append_thread_conversation(thread_id, "llm", "Thanks for the offer, but the mechanic needs the exact part as requested.")
     return {"status": "declined"}
+
+@router.post("/dealer-threads/{thread_id}/mark-read")
+async def mark_thread_read_endpoint(thread_id: int):
+    db.mark_thread_read(thread_id)
+    return {"status": "ok"}

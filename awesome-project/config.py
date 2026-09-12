@@ -1,3 +1,3 @@
 import os
 
-LLM_URL = os.environ.get("LLM_URL", "https://phenomenally-slavish-lilly.ngrok-free.dev/generate")
+LLM_URL = os.environ.get("LLM_URL", "https://mayflower-lily-clique.ngrok-free.dev/generate")

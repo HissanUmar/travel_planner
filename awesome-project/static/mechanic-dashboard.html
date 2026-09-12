@@ -58,6 +58,40 @@
   .offer-actions button { border: none; border-radius: 6px; padding: 0 10px; cursor: pointer; font-size: 12px; }
   .btn-negotiate { background: #2a2e37; color: var(--text); }
   .btn-confirm { background: var(--accent); font-weight: 600; }
+  .btn-chat { background: #2a2e37; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; }
+  .btn-chat:hover { background: #353a45; }
+
+  .thread-chat {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin-top: 10px;
+    max-height: 220px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .thread-bubble {
+    max-width: 80%;
+    padding: 7px 11px;
+    border-radius: 8px;
+    font-size: 13px;
+    white-space: pre-wrap;
+    line-height: 1.4;
+  }
+  .thread-bubble.dealer {
+    align-self: flex-start;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .thread-bubble.llm, .thread-bubble.mechanic {
+    align-self: flex-end;
+    background: #23374d;
+    color: #a5d8ff;
+  }
 
   .top-actions { display: flex; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--border); }
   .top-actions button { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px; }
@@ -92,6 +126,7 @@
 <script>
 let activeRequestId = null;
 let knownUnread = {};
+const openThreadChats = new Set();
 
 if ("Notification" in window && Notification.permission === "default") {
   Notification.requestPermission();
@@ -179,10 +214,15 @@ function renderBubble(m) {
   return bubble;
 }
 
-async function openRequest(id) {
+async function openRequest(id, isPoll = false) {
+  if (activeRequestId !== id) {
+    openThreadChats.clear();
+  }
   activeRequestId = id;
 
-  await fetch(`/mechanic-requests/${id}/mark-read`, { method: 'POST' });
+  if (!isPoll) {
+    await fetch(`/mechanic-requests/${id}/mark-read`, { method: 'POST' });
+  }
 
   const res = await fetch(`/mechanic-requests/${id}`);
   const req = await res.json();
@@ -190,6 +230,9 @@ async function openRequest(id) {
   document.getElementById('chat-header').textContent = requestTitle(req);
 
   const box = document.getElementById('chat-messages');
+  const prevScrollTop = box.scrollTop;
+  const wasNearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 60;
+
   box.innerHTML = '';
   req.conversation.forEach(m => box.appendChild(renderBubble(m)));
 
@@ -211,7 +254,12 @@ async function openRequest(id) {
     await renderOffers(id);
   }
 
-  box.scrollTop = box.scrollHeight;
+  if (!isPoll || wasNearBottom) {
+    box.scrollTop = box.scrollHeight;
+  } else {
+    box.scrollTop = prevScrollTop;
+  }
+
   loadRequests();
 }
 
@@ -236,38 +284,51 @@ async function renderOffers(requestId) {
   }
 
   threads.forEach(t => {
-    const card = document.createElement('div');
-    card.className = 'offer-card';
+      const card = document.createElement('div');
+      card.className = 'offer-card';
 
-    let statusLine, actionsHtml = '';
+      let statusLine, actionsHtml = '';
+      const canChat = !['REJECTED', 'CLOSED', 'NO_RESPONSE'].includes(t.status);
+      const unreadBadge = t.has_unread ? ' <span style="color:var(--warn);">●</span>' : '';
+      const isOpen = openThreadChats.has(t.id);
 
-    if (t.status === 'REJECTED') {
-      statusLine = `<b>${t.shop_name}</b> — Unavailable`;
-    } else if (t.status === 'CLOSED') {
-      statusLine = `<b>${t.shop_name}</b> — Declined (another dealer chosen)`;
-    } else if (t.status === 'NO_RESPONSE') {
-      statusLine = `<b>${t.shop_name}</b> — No response`;
-    } else if (t.status === 'AWAITING_MECHANIC_INPUT') {
-      statusLine = `<b>${t.shop_name}</b> — Waiting on your answer above`;
-    } else if (t.status === 'SELECTED') {
-      statusLine = `<b>${t.shop_name}</b> — PKR ${t.price} (${t.is_genuine === 'True' ? 'genuine' : 'aftermarket'}) — ✅ Confirmed`;
-    } else if (t.price) {
-      statusLine = `<b>${t.shop_name}</b> — PKR ${t.price} (${t.is_genuine === 'True' ? 'genuine' : 'aftermarket'})`;
-      actionsHtml = `
-        <div class="offer-actions">
-          <input id="neg-${t.id}" placeholder="Counter-offer or question...">
-          <button class="btn-negotiate" onclick="negotiate(${t.id})">Negotiate</button>
-          <button class="btn-confirm" onclick="confirmOffer(${t.id})">Confirm</button>
-        </div>`;
-    } else {
-      statusLine = `<b>${t.shop_name}</b> — Waiting for response...`;
-    }
+      if (t.status === 'REJECTED') {
+        statusLine = `<b>${t.shop_name}</b> — Unavailable`;
+      } else if (t.status === 'CLOSED') {
+        statusLine = `<b>${t.shop_name}</b> — Declined (another dealer chosen)`;
+      } else if (t.status === 'NO_RESPONSE') {
+        statusLine = `<b>${t.shop_name}</b> — No response`;
+      } else if (t.status === 'AWAITING_MECHANIC_INPUT') {
+        statusLine = `<b>${t.shop_name}</b>${unreadBadge} — Waiting on your answer`;
+      } else if (t.status === 'SELECTED') {
+        statusLine = `<b>${t.shop_name}</b>${unreadBadge} — PKR ${t.price} (${t.is_genuine === 'True' ? 'genuine' : 'aftermarket'}) — ✅ Confirmed`;
+      } else if (t.price) {
+        statusLine = `<b>${t.shop_name}</b>${unreadBadge} — PKR ${t.price} (${t.is_genuine === 'True' ? 'genuine' : 'aftermarket'})`;
+      } else {
+        statusLine = `<b>${t.shop_name}</b>${unreadBadge} — Waiting for response...`;
+      }
 
-    card.innerHTML = `<div class="offer-status">${statusLine}</div>${actionsHtml}`;
-    panel.appendChild(card);
+      if (canChat) {
+        const showConfirm = t.price && t.status !== 'SELECTED';
+        actionsHtml = `
+          <div class="offer-actions">
+            <button class="btn-chat" id="btn-chat-${t.id}" onclick="toggleThreadChat(${t.id})">${isOpen ? 'Close Chat' : 'Chat'}${unreadBadge}</button>
+            ${showConfirm ? `<button class="btn-confirm" onclick="confirmOffer(${t.id})">Confirm</button>` : ''}
+          </div>
+          <div id="thread-chat-${t.id}" style="${isOpen ? 'display:block;' : 'display:none;'}"></div>
+        `;
+      }
+
+      card.innerHTML = `<div class="offer-status">${statusLine}</div>${actionsHtml}`;
+      panel.appendChild(card);
   });
 
   box.appendChild(panel);
+
+  const openThreads = threads.filter(t => openThreadChats.has(t.id) && !['REJECTED', 'CLOSED', 'NO_RESPONSE'].includes(t.status));
+  if (openThreads.length > 0) {
+    await Promise.all(openThreads.map(t => loadThreadChat(t.id)));
+  }
 }
 
 async function answerDealerQuestion(threadId) {
@@ -294,15 +355,7 @@ async function declineAlternative(threadId) {
 }
 
 async function negotiate(threadId) {
-  const input = document.getElementById(`neg-${threadId}`);
-  const text = input.value.trim();
-  if (!text) return;
-  await fetch(`/dealer-threads/${threadId}/negotiate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text })
-  });
-  openRequest(activeRequestId);
+  return sendThreadMessage(threadId);
 }
 
 async function confirmOffer(threadId) {
@@ -347,6 +400,127 @@ async function sendMessage() {
   }
 }
 
+async function toggleThreadChat(threadId) {
+  const container = document.getElementById(`thread-chat-${threadId}`);
+  const btn = document.getElementById(`btn-chat-${threadId}`);
+
+  if (openThreadChats.has(threadId)) {
+    openThreadChats.delete(threadId);
+    if (container) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+    }
+    if (btn) {
+      btn.textContent = 'Chat';
+    }
+    return;
+  }
+
+  openThreadChats.add(threadId);
+  if (btn) {
+    btn.textContent = 'Close Chat';
+  }
+  if (container) {
+    container.style.display = 'block';
+    container.innerHTML = '<div style="color:var(--muted); font-size:12px; padding:8px;">Loading chat...</div>';
+  }
+  await loadThreadChat(threadId);
+}
+
+async function loadThreadChat(threadId) {
+  const container = document.getElementById(`thread-chat-${threadId}`);
+  if (!container) return;
+
+  const existingInput = document.getElementById(`chat-input-${threadId}`);
+  const draftText = existingInput ? existingInput.value : '';
+  const wasFocused = (document.activeElement === existingInput);
+  const selectionStart = existingInput ? existingInput.selectionStart : null;
+  const selectionEnd = existingInput ? existingInput.selectionEnd : null;
+
+  try {
+    await fetch(`/dealer-threads/${threadId}/mark-read`, { method: 'POST' });
+    const res = await fetch(`/dealer-threads/thread/${threadId}`);
+    if (!res.ok) return;
+    const thread = await res.json();
+
+    const chatBox = document.createElement('div');
+    chatBox.className = 'thread-chat';
+    if (!thread.conversation || thread.conversation.length === 0) {
+      const emptyNote = document.createElement('div');
+      emptyNote.style.color = 'var(--muted)';
+      emptyNote.style.fontSize = '12px';
+      emptyNote.style.padding = '6px';
+      emptyNote.textContent = 'No messages in this chat yet.';
+      chatBox.appendChild(emptyNote);
+    } else {
+      thread.conversation.forEach(m => {
+        const b = document.createElement('div');
+        b.className = 'thread-bubble ' + (m.role === 'dealer' ? 'dealer' : 'llm');
+        b.textContent = m.text;
+        chatBox.appendChild(b);
+      });
+    }
+
+    const inputRow = document.createElement('div');
+    inputRow.className = 'offer-actions';
+
+    const input = document.createElement('input');
+    input.id = `chat-input-${threadId}`;
+    input.placeholder = 'Message this dealer...';
+    input.value = draftText;
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendThreadMessage(threadId);
+      }
+    });
+
+    const sendBtn = document.createElement('button');
+    sendBtn.className = 'btn-negotiate';
+    sendBtn.textContent = 'Send';
+    sendBtn.onclick = () => sendThreadMessage(threadId);
+
+    inputRow.appendChild(input);
+    inputRow.appendChild(sendBtn);
+
+    container.innerHTML = '';
+    container.appendChild(chatBox);
+    container.appendChild(inputRow);
+    container.style.display = 'block';
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    if (wasFocused) {
+      input.focus();
+      if (selectionStart !== null && selectionEnd !== null) {
+        input.setSelectionRange(selectionStart, selectionEnd);
+      }
+    }
+  } catch (err) {
+    console.error('Error loading thread chat', err);
+  }
+}
+
+async function sendThreadMessage(threadId) {
+  const input = document.getElementById(`chat-input-${threadId}`);
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  try {
+    await fetch(`/dealer-threads/${threadId}/negotiate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+  } catch (err) {
+    console.error('Failed to send message to dealer', err);
+  }
+
+  await loadThreadChat(threadId);
+  loadRequests();
+}
+
 function startNewRequest() {
   activeRequestId = null;
   document.getElementById('chat-header').textContent = 'New request';
@@ -363,9 +537,18 @@ document.getElementById('msg-input')?.addEventListener('keydown', e => {
 loadRequests();
 setInterval(() => {
   const active = document.activeElement;
-  const typing = active && (active.id === 'msg-input' || (active.id && (active.id.startsWith('neg-') || active.id.startsWith('answer-'))));
+  const isTyping = active && (
+    active.id === 'msg-input' ||
+    (active.id && (
+      active.id.startsWith('chat-input-') ||
+      active.id.startsWith('neg-') ||
+      active.id.startsWith('answer-')
+    ))
+  );
   loadRequests();
-  if (activeRequestId && !typing) openRequest(activeRequestId);
+  if (activeRequestId && !isTyping) {
+    openRequest(activeRequestId, true);
+  }
 }, 4000);
 </script>
 

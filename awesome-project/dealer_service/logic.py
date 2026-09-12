@@ -167,3 +167,27 @@ def check_stale_threads(hours: int = 6) -> int:
             db.append_conversation(thread["request_id"], "llm", summary, msg_type="update")
             db.mark_unread(thread["request_id"])
     return len(stale)
+
+
+def handle_dealer_question(thread: dict, request: dict, text: str) -> str:
+    db.append_thread_conversation(thread["id"], "dealer", text, msg_type="question")
+    db.set_pending_mechanic_question(thread["id"], text)
+    db.mark_thread_unread(thread["id"])
+    db.mark_unread(request["id"])  # sidebar dot only — content lives in the thread, not the general feed
+    reply = "Let me check with the mechanic and get back to you."
+    db.append_thread_conversation(thread["id"], "llm", reply)
+    return reply
+
+def handle_alternative_offer(thread: dict, request: dict, text: str) -> str:
+    db.append_thread_conversation(thread["id"], "dealer", text, msg_type="alternative")
+    try:
+        offer = extract_json(call_llm(build_extract_alternative_prompt(text)))
+    except Exception:
+        offer = {"description": text, "price": None}
+
+    db.set_alternative_offer(thread["id"], offer)
+    db.mark_thread_unread(thread["id"])
+    db.mark_unread(request["id"])  # sidebar dot only
+    reply = "Thanks, I'll pass this alternative along to the mechanic."
+    db.append_thread_conversation(thread["id"], "llm", reply)
+    return reply
