@@ -4,6 +4,7 @@ import db
 import whatsapp
 import json
 from .logic import broadcast_to_dealers
+from sanitize import sanitize_message
 
 router = APIRouter()
 
@@ -27,10 +28,11 @@ async def negotiate(thread_id: int, msg: NegotiateMessage):
     thread = db.get_thread(thread_id)
     if not thread:
         raise HTTPException(status_code=404, detail="thread not found")
-    whatsapp.send_message(thread["shop_phone"], msg.text)
-    db.append_thread_conversation(thread_id, "llm", msg.text)
+    clean_text = sanitize_message(msg.text)
+    db.append_thread_conversation(thread_id, "llm", clean_text)
     db.update_thread(thread_id, status="RESPONDED")
-    return {"status": "sent"}
+    wa_res = whatsapp.send_message(thread["shop_phone"], clean_text)
+    return {"status": "sent", "whatsapp": wa_res, "text_sent": clean_text}
 
 @router.post("/dealer-threads/{thread_id}/confirm")
 async def confirm(thread_id: int):
@@ -46,14 +48,14 @@ async def confirm(thread_id: int):
 
     part_name = db.get_request(thread["request_id"])["part_name"]
     confirm_msg = f"Great news — the mechanic has confirmed. Please prepare the {part_name} at PKR {thread['price']}. We'll follow up on delivery details."
-    whatsapp.send_message(thread["shop_phone"], confirm_msg)
     db.append_thread_conversation(thread_id, "llm", confirm_msg)
+    whatsapp.send_message(thread["shop_phone"], confirm_msg)
 
     declined = db.close_other_threads(thread["request_id"], thread_id)
     for d in declined:
         decline_msg = "Thanks for the offer — the mechanic went with another dealer this time. We'll reach out again next time!"
-        whatsapp.send_message(d["shop_phone"], decline_msg)
         db.append_thread_conversation(d["id"], "llm", decline_msg)
+        whatsapp.send_message(d["shop_phone"], decline_msg)
 
     db.append_conversation(
         thread["request_id"], "llm",
@@ -67,9 +69,10 @@ async def pursue_alternative(thread_id: int):
     thread = db.get_thread(thread_id)
     if not thread:
         raise HTTPException(status_code=404, detail="thread not found")
-    whatsapp.send_message(thread["shop_phone"], "The mechanic is interested in your alternative offer — could you confirm the exact price and whether it's genuine or aftermarket?")
-    db.append_thread_conversation(thread_id, "llm", "The mechanic is interested in your alternative offer — could you confirm the exact price and whether it's genuine or aftermarket?")
+    msg_text = "The mechanic is interested in your alternative offer — could you confirm the exact price and whether it's genuine or aftermarket?"
+    db.append_thread_conversation(thread_id, "llm", msg_text)
     db.update_thread(thread_id, status="RESPONDED")
+    whatsapp.send_message(thread["shop_phone"], msg_text)
     return {"status": "sent"}
 
 @router.post("/dealer-threads/{thread_id}/decline-alternative")
@@ -77,8 +80,9 @@ async def decline_alternative(thread_id: int):
     thread = db.get_thread(thread_id)
     if not thread:
         raise HTTPException(status_code=404, detail="thread not found")
-    whatsapp.send_message(thread["shop_phone"], "Thanks for the offer, but the mechanic needs the exact part as requested.")
-    db.append_thread_conversation(thread_id, "llm", "Thanks for the offer, but the mechanic needs the exact part as requested.")
+    msg_text = "Thanks for the offer, but the mechanic needs the exact part as requested."
+    db.append_thread_conversation(thread_id, "llm", msg_text)
+    whatsapp.send_message(thread["shop_phone"], msg_text)
     return {"status": "declined"}
 
 @router.post("/dealer-threads/{thread_id}/mark-read")

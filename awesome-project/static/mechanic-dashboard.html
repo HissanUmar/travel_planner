@@ -29,6 +29,7 @@
   .bubble.mechanic { align-self: flex-end; background: #2a2e37; }
   .bubble.llm { align-self: flex-start; background: #1d2027; }
   .bubble.update { align-self: center; background: #143d33; color: #8fe0c8; font-size: 13px; }
+  .bubble.report { align-self: center; background: #182635; border: 1px solid #38bdf8; color: #f0f6fc; font-size: 13px; max-width: 85%; padding: 12px 16px; border-radius: 10px; }
 
   .question-card { align-self: center; background: #3a2f14; color: #f0d090; border-radius: 10px; padding: 12px; max-width: 80%; }
   .question-card .q-actions { margin-top: 8px; display: flex; gap: 6px; }
@@ -113,6 +114,7 @@
 <div id="chat">
   <div id="chat-header">Select a request</div>
   <div id="top-actions" class="top-actions" style="display:none;">
+    <button onclick="requestReport()">📊 Summary Report</button>
     <button onclick="pingDealers()">Any update?</button>
     <button onclick="cancelRequest()">Cancel request</button>
   </div>
@@ -207,6 +209,13 @@ function renderBubble(m) {
     return card;
   }
 
+  if (m.type === 'report') {
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble report';
+    bubble.textContent = m.text;
+    return bubble;
+  }
+
   const bubble = document.createElement('div');
   const isUpdate = m.type === 'update' || (m.role === 'llm' && m.text.startsWith('Update:'));
   bubble.className = 'bubble ' + (isUpdate ? 'update' : (m.role === 'mechanic' ? 'mechanic' : 'llm'));
@@ -240,7 +249,7 @@ async function openRequest(id, isPoll = false) {
   const canAsk = ['BROADCASTING', 'REPORT_READY'].includes(req.status);
 
   document.getElementById('chat-input-row').style.display = (editable || canAsk) ? 'flex' : 'none';
-  document.getElementById('msg-input').placeholder = editable ? 'Type a message...' : 'Ask a question about this request...';
+  document.getElementById('msg-input').placeholder = editable ? 'Type a message...' : 'Message all dealers or ask a question...';
   document.getElementById('top-actions').style.display = canAsk ? 'flex' : 'none';
 
   if (req.status === 'BROADCASTING') {
@@ -377,6 +386,12 @@ async function cancelRequest() {
   openRequest(activeRequestId);
 }
 
+async function requestReport() {
+  if (!activeRequestId) return;
+  await fetch(`/mechanic-requests/${activeRequestId}/generate-report`, { method: 'POST' });
+  openRequest(activeRequestId);
+}
+
 async function sendMessage() {
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
@@ -388,7 +403,7 @@ async function sendMessage() {
   await fetch('/mechanic-message', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone, text })
+    body: JSON.stringify({ phone, text, request_id: activeRequestId })
   });
 
   const res = await fetch(`/mechanic-requests?phone=${phone}`);

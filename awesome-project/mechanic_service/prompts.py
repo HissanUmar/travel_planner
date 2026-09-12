@@ -14,15 +14,15 @@ Message:"""
 CLASSIFY_PROMPT = """A mechanic is messaging our car-parts sourcing system. Current request state:
 Status: {status}
 Known so far: car_model={car_model}, part_name={part_name}, missing fields: {missing}
-Is there a dealer question waiting for the mechanic's answer right now? {has_pending_question}
 
 Their message: "{text}"
 
 Classify this message as ONE of:
-- PROVIDING_FIELDS (giving car/part details, answering a clarification)
-- ASKING_QUESTION (asking about status, process, or general question — not providing new part details)
-- REQUESTING_CHANGE (trying to change already-confirmed details of a request that's already broadcasting)
-- ANSWERING_DEALER_QUESTION (answering the pending dealer question shown above, if one exists)
+- PROVIDING_FIELDS (giving car/part details or answering a clarification when creating a request)
+- BROADCAST_TO_DEALERS (a message, question, condition, or offer meant for the auto-parts dealers, e.g. asking about delivery, warranty, timeline, counter-offers, or telling dealers something)
+- GENERATE_REPORT (asking for a report, summary of quotes, best prices, or offer overview)
+- ASKING_QUESTION (asking general questions about the request status, timeline, or how the app works)
+- REQUESTING_CHANGE (trying to change already-confirmed car model, year, or part specifications)
 
 Reply with ONLY the label.
 Label:"""

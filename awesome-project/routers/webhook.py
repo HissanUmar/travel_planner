@@ -5,6 +5,7 @@ from config import LLM_URL
 import db
 import whatsapp
 from dealer_service.logic import handle_dealer_reply
+from sanitize import sanitize_message
 
 router = APIRouter()
 
@@ -28,11 +29,14 @@ async def receive_webhook(request: Request):
 
     db.save_whatsapp_message(from_number, "in", text, msg_id)
 
+    # Sanitize incoming text before processing — strips phone numbers shared by dealer
+    clean_text = sanitize_message(text)
+
     # Check: is this a dealer replying about a specific part request?
     thread = db.get_open_thread_by_phone(from_number)
     if thread:
         try:
-            reply_text = handle_dealer_reply(thread, text)
+            reply_text = handle_dealer_reply(thread, clean_text)
         except Exception as e:
             import traceback
             print("DEALER REPLY ERROR:", e)
@@ -44,7 +48,7 @@ async def receive_webhook(request: Request):
 
     shop = db.get_shop_by_phone(from_number)
     if shop:
-        reply_text = handle_cold_dealer_message(shop, text)
+        reply_text = handle_cold_dealer_message(shop, clean_text)
         whatsapp.send_message(from_number, reply_text)
         db.save_whatsapp_message(from_number, "out", reply_text)
         return {"status": "cold_dealer_handled"}
